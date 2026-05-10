@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_controller.h"
 #include "info/statistics/info_statistics_widget.h"
 #include "boxes/delete_messages_box.h"
+#include "boxes/moderate_messages_box.h"
 #include "boxes/report_messages_box.h"
 #include "media/audio/media_audio.h"
 #include "media/view/media_view_group_thumbs.h"
@@ -1246,7 +1247,7 @@ QSize OverlayWidget::videoSize() const {
 	Expects(videoShown());
 
 	const auto use = (_document && _chosenQuality != _document)
-		? _document->dimensions
+		? _chosenQuality->dimensions
 		: _streamed->instance.info().video.size;
 	return flipSizeByRotation(use);
 }
@@ -3344,10 +3345,21 @@ void OverlayWidget::deleteMedia() {
 					Ui::LayerOption::CloseOther);
 			}
 		} else if (message) {
-			const auto suggestModerateActions = true;
-			window->show(
-				Box<DeleteMessagesBox>(message, suggestModerateActions),
-				Ui::LayerOption::CloseOther);
+			const auto list = HistoryItemsList{ message };
+			if (CanCreateModerateMessagesBox(list)) {
+				const auto opt = DefaultModerateMessagesBoxOptions();
+				window->show(
+					Box(
+						CreateModerateMessagesBox,
+						ModerateMessagesBoxEntry{ .items = list },
+						nullptr,
+						opt),
+					Ui::LayerOption::CloseOther);
+			} else {
+				window->show(
+					Box<DeleteMessagesBox>(message),
+					Ui::LayerOption::CloseOther);
+			}
 		}
 	}
 }
@@ -4727,8 +4739,23 @@ void OverlayWidget::initStreamingThumbnail() {
 void OverlayWidget::streamingReady(Streaming::Information &&info) {
 	markStreamedReady();
 	if (videoShown()) {
+		if (_document
+			&& _streamed
+			&& _streamed->ready
+			&& (!_chosenQuality || _chosenQuality == _document)) {
+			if (const auto video = _document->video()) {
+				video->realVideoSize = info.video.realSize;
+			}
+		}
 		applyVideoSize();
 		_streamedQualityChangeFrame = QImage();
+		if (_streamed && _streamed->controls) {
+			crl::on_main(_widget, [=] {
+				if (_streamed && _streamed->controls) {
+					_streamed->controls->updateSpeedToggleQuality();
+				}
+			});
+		}
 	} else {
 		updateContentRect();
 	}
@@ -5234,7 +5261,7 @@ float64 OverlayWidget::playbackControlsCurrentSpeed(bool lastNonDefault) {
 	return Core::App().settings().videoPlaybackSpeed(lastNonDefault);
 }
 
-std::vector<int> OverlayWidget::playbackControlsQualities() {
+std::vector<VideoQuality> OverlayWidget::playbackControlsQualities() {
 	if (!_document) {
 		return {};
 	}
@@ -5242,27 +5269,37 @@ std::vector<int> OverlayWidget::playbackControlsQualities() {
 	if (list.empty()) {
 		return {};
 	}
-	auto result = std::vector<int>();
+	auto result = std::vector<VideoQuality>();
 	result.reserve(list.size());
 	for (const auto &quality : list) {
-		result.push_back(quality->resolveVideoQuality());
+		const auto value = VideoQuality{
+			.manual = 1u,
+			.height = uint32(quality->resolveVideoQuality()),
+			.original = (quality == _document) ? 1u : 0u,
+		};
+		if (!ranges::contains(result, value)) {
+			result.push_back(value);
+		}
 	}
 	return result;
 }
 
 VideoQuality OverlayWidget::playbackControlsCurrentQuality() {
-	return _chosenQuality
-		? VideoQuality{
-			.manual = _quality.manual,
-			.height = uint32(_chosenQuality->resolveVideoQuality()),
-		}
-		: _quality;
+	if (!_chosenQuality) {
+		return _quality;
+	}
+	return {
+		.manual = _quality.manual,
+		.height = uint32(_chosenQuality->resolveVideoQuality()),
+		.original = (_chosenQuality == _document) ? 1u : 0u,
+	};
 }
 
-void OverlayWidget::playbackControlsQualityChanged(int quality) {
+void OverlayWidget::playbackControlsQualityChanged(VideoQuality quality) {
 	applyVideoQuality({
-		.manual = (quality > 0),
-		.height = quality ? uint32(quality) : _quality.height,
+		.manual = uint32(quality.height ? 1 : 0),
+		.height = quality.height,
+		.original = quality.original,
 	});
 }
 
@@ -5569,6 +5606,7 @@ void OverlayWidget::updatePlaybackState() {
 		_streamedPosition = state.position;
 		if (_streamed->controls) {
 			_streamed->controls->updatePlayback(state);
+			_streamed->controls->updateSpeedToggleQuality();
 			_touchbarTrackState.fire_copy(state);
 			updatePowerSaveBlocker(state);
 		}
