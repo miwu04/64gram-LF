@@ -1,4 +1,4 @@
-# This file is part of Telegram Desktop,
+﻿# This file is part of Telegram Desktop,
 # the official desktop application for the Telegram messaging service.
 #
 # For license and copyright information please follow this link:
@@ -791,6 +791,8 @@ PRIVATE
     dialogs/dialogs_indexed_list.h
     dialogs/dialogs_inner_widget.cpp
     dialogs/dialogs_inner_widget.h
+    dialogs/dialogs_inner_widget_accessibility.cpp
+    dialogs/dialogs_inner_widget_accessibility.h
     dialogs/dialogs_key.cpp
     dialogs/dialogs_key.h
     dialogs/dialogs_list.cpp
