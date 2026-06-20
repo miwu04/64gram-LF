@@ -90,6 +90,10 @@ public:
 
 	void setCloseByOutsideClick(bool close) override;
 	bool closeByOutsideClick() const override;
+	bool closeByBackButton() override;
+	[[nodiscard]] crl::time animationDuration() const override {
+		return _content->layerAnimationDuration();
+	}
 
 	rpl::producer<int> layerHeightMaxValue() override;
 	rpl::producer<int> contentHeightMaxValue() override;
